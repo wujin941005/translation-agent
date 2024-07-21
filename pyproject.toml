@@ -14,6 +14,7 @@ keywords = ["translation", "agents", "LLM", "machine translation"]
 [tool.poetry.dependencies]
 python = "^3.9"
 openai = "^1.28.1"
+anthropic = "^0.31.2"
 tiktoken = "^0.6.0"
 joblib = "^1.4.2"
 pysrt = "^1.1.2"

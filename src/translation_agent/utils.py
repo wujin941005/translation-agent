@@ -1,7 +1,7 @@
 import os
 from typing import List, Union
-
 import openai
+import anthropic
 import tiktoken
 from dotenv import load_dotenv
 from icecream import ic
@@ -9,7 +9,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 load_dotenv()  # read local .env file
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+## client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 MAX_TOKENS_PER_CHUNK = (
     1000  # if text is more than this many tokens, we'll break it up into
@@ -20,9 +22,11 @@ MAX_TOKENS_PER_CHUNK = (
 def get_completion(
     prompt: str,
     system_message: str = "You are a helpful assistant.",
-    model: str = "gpt-4-turbo",
-    temperature: float = 0.3,
+    user_prompt: str = "",
+    ##model: str = "gpt-4-turbo",
+    temperature: float = 0.2,
     json_mode: bool = False,
+    api_choice: str = "claude",
 ) -> Union[str, dict]:
     """
         Generate a completion using the OpenAI API.
@@ -44,33 +48,43 @@ def get_completion(
             If json_mode is False, returns the generated text as a string.
     """
 
-    if json_mode:
-        response = client.chat.completions.create(
-            model=model,
-            temperature=temperature,
-            top_p=1,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        return response.choices[0].message.content
-    else:
-        response = client.chat.completions.create(
-            model=model,
-            temperature=temperature,
-            top_p=1,
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        return response.choices[0].message.content
+    if api_choice == "openai":
+        messages = [
+            {"role": "system", "content": system_message},
+        ]
+        if user_prompt:
+            messages.append({"role": "user", "content": user_prompt})
+        messages.append({"role": "user", "content": prompt})
 
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            temperature=temperature,
+            messages=messages,
+            response_format={"type": "json_object"} if json_mode else None,
+        )
+        return response.choices[0].message.content
+    elif api_choice == "claude":
+        messages = []
+        if user_prompt:
+            messages.extend([
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": "Understood. I'll keep that in mind for the task."}
+            ])
+        messages.append({"role": "user", "content": prompt})
+
+        response = anthropic_client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            system=system_message,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=4000,
+        )
+        return response.content[0].text
+    else:
+        raise ValueError("Invalid API choice. Choose 'openai' or 'claude'.")
 
 def one_chunk_initial_translation(
-    source_lang: str, target_lang: str, source_text: str
+    source_lang: str, target_lang: str, source_text: str, api_choice: str = "claude", user_prompt: str = ""
 ) -> str:
     """
     Translate the entire text as one chunk using an LLM.
@@ -92,7 +106,7 @@ Do not provide any explanations or text apart from the translation.
 
 {target_lang}:"""
 
-    translation = get_completion(translation_prompt, system_message=system_message)
+    translation = get_completion(translation_prompt, system_message=system_message, user_prompt=user_prompt, api_choice=api_choice)
 
     return translation
 
@@ -103,6 +117,7 @@ def one_chunk_reflect_on_translation(
     source_text: str,
     translation_1: str,
     country: str = "",
+    api_choice: str = "claude",
 ) -> str:
     """
     Use an LLM to reflect on the translation, treating the entire text as one chunk.
@@ -168,7 +183,7 @@ Write a list of specific, helpful and constructive suggestions for improving the
 Each suggestion should address one specific part of the translation.
 Output only the suggestions and nothing else."""
 
-    reflection = get_completion(reflection_prompt, system_message=system_message)
+    reflection = get_completion(reflection_prompt, system_message=system_message, api_choice=api_choice)
     return reflection
 
 
@@ -178,6 +193,7 @@ def one_chunk_improve_translation(
     source_text: str,
     translation_1: str,
     reflection: str,
+    api_choice: str = "claude",
 ) -> str:
     """
     Use the reflection to improve the translation, treating the entire text as one chunk.
@@ -223,13 +239,13 @@ Please take into account the expert suggestions when editing the translation. Ed
 
 Output only the new translation and nothing else."""
 
-    translation_2 = get_completion(prompt, system_message)
+    translation_2 = get_completion(prompt, system_message, api_choice=api_choice)
 
     return translation_2
 
 
 def one_chunk_translate_text(
-    source_lang: str, target_lang: str, source_text: str, country: str = ""
+    source_lang: str, target_lang: str, source_text: str, country: str = "", api_choice: str = "claude", user_prompt: str = ""
 ) -> str:
     """
     Translate a single chunk of text from the source language to the target language.
@@ -247,14 +263,14 @@ def one_chunk_translate_text(
         str: The improved translation of the source text.
     """
     translation_1 = one_chunk_initial_translation(
-        source_lang, target_lang, source_text
+        source_lang, target_lang, source_text, api_choice, user_prompt
     )
 
     reflection = one_chunk_reflect_on_translation(
-        source_lang, target_lang, source_text, translation_1, country
+        source_lang, target_lang, source_text, translation_1, country, api_choice
     )
     translation_2 = one_chunk_improve_translation(
-        source_lang, target_lang, source_text, translation_1, reflection
+        source_lang, target_lang, source_text, translation_1, reflection, api_choice
     )
 
     return translation_2
@@ -286,7 +302,7 @@ def num_tokens_in_string(
 
 
 def multichunk_initial_translation(
-    source_lang: str, target_lang: str, source_text_chunks: List[str]
+    source_lang: str, target_lang: str, source_text_chunks: List[str], api_choice: str = "claude", user_prompt: str = ""
 ) -> List[str]:
     """
     Translate a text in multiple chunks from the source language to the target language.
@@ -338,7 +354,7 @@ Output only the translation of the portion you are asked to translate, and nothi
             chunk_to_translate=source_text_chunks[i],
         )
 
-        translation = get_completion(prompt, system_message=system_message)
+        translation = get_completion(prompt, system_message=system_message, user_prompt=user_prompt, api_choice=api_choice)
         translation_chunks.append(translation)
 
     return translation_chunks
@@ -350,6 +366,7 @@ def multichunk_reflect_on_translation(
     source_text_chunks: List[str],
     translation_1_chunks: List[str],
     country: str = "",
+    api_choice: str = "claude",
 ) -> List[str]:
     """
     Provides constructive criticism and suggestions for improving a partial translation.
@@ -459,7 +476,7 @@ Output only the suggestions and nothing else."""
                 translation_1_chunk=translation_1_chunks[i],
             )
 
-        reflection = get_completion(prompt, system_message=system_message)
+        reflection = get_completion(prompt, system_message=system_message, api_choice=api_choice)
         reflection_chunks.append(reflection)
 
     return reflection_chunks
@@ -471,6 +488,7 @@ def multichunk_improve_translation(
     source_text_chunks: List[str],
     translation_1_chunks: List[str],
     reflection_chunks: List[str],
+    api_choice: str = "claude",
 ) -> List[str]:
     """
     Improves the translation of a text from source language to target language by considering expert suggestions.
@@ -545,14 +563,14 @@ Output only the new translation of the indicated part and nothing else."""
             reflection_chunk=reflection_chunks[i],
         )
 
-        translation_2 = get_completion(prompt, system_message=system_message)
+        translation_2 = get_completion(prompt, system_message=system_message, api_choice=api_choice)
         translation_2_chunks.append(translation_2)
 
     return translation_2_chunks
 
 
 def multichunk_translation(
-    source_lang, target_lang, source_text_chunks, country: str = ""
+    source_lang, target_lang, source_text_chunks, country: str = "", api_choice="claude", user_prompt=""
 ):
     """
     Improves the translation of multiple text chunks based on the initial translation and reflection.
@@ -569,7 +587,7 @@ def multichunk_translation(
     """
 
     translation_1_chunks = multichunk_initial_translation(
-        source_lang, target_lang, source_text_chunks
+        source_lang, target_lang, source_text_chunks, api_choice, user_prompt
     )
 
     reflection_chunks = multichunk_reflect_on_translation(
@@ -578,6 +596,7 @@ def multichunk_translation(
         source_text_chunks,
         translation_1_chunks,
         country,
+        api_choice,
     )
 
     translation_2_chunks = multichunk_improve_translation(
@@ -586,6 +605,7 @@ def multichunk_translation(
         source_text_chunks,
         translation_1_chunks,
         reflection_chunks,
+        api_choice
     )
 
     return translation_2_chunks
@@ -638,7 +658,18 @@ def translate(
     source_text,
     country,
     max_tokens=MAX_TOKENS_PER_CHUNK,
+    api_choice="claude",
+    user_prompt="",
 ):
+    word_count = len(source_text.strip())
+
+    print(f"Input text contains approximately {word_count} words.")
+    user_confirmation = input("Do you want to proceed with the translation? (y/n): ")
+    
+    if user_confirmation.lower() != 'y':
+        print("Translation cancelled.")
+        return
+    
     """Translate the source_text from source_lang to target_lang."""
 
     num_tokens_in_text = num_tokens_in_string(source_text)
@@ -649,7 +680,7 @@ def translate(
         ic("Translating text as a single chunk")
 
         final_translation = one_chunk_translate_text(
-            source_lang, target_lang, source_text, country
+            source_lang, target_lang, source_text, country, api_choice, user_prompt
         )
 
         return final_translation
@@ -672,7 +703,7 @@ def translate(
         source_text_chunks = text_splitter.split_text(source_text)
 
         translation_2_chunks = multichunk_translation(
-            source_lang, target_lang, source_text_chunks, country
+            source_lang, target_lang, source_text_chunks, country, api_choice, user_prompt
         )
 
         return "".join(translation_2_chunks)
