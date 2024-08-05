@@ -1,12 +1,24 @@
 import os
+import re
 import translation_agent as ta
 from openpyxl import Workbook, load_workbook
 from datetime import date
 from icecream import ic
 
-def count_characters(text):
-    # 移除空白字符后计算字符数
-    return len(''.join(text.strip()))
+def count_words(text):
+    # 去除首尾空白字符
+    text = text.strip()
+    
+    # 专门方法：统计英文单词、数字和中文字符
+    english_words = len(re.findall(r'\b[a-zA-Z0-9]+\b', text))
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
+    specialized_count = english_words + chinese_chars
+    
+    # 通用方法：统计所有非空白字符序列
+    general_count = len(re.findall(r'\S+', text))
+    
+    # 返回两种方法中的最大值
+    return max(specialized_count, general_count)
 
 def create_or_update_excel(client_name, source_text, source_lang, target_lang, translation):
     filename = f"{client_name}.xlsx"
@@ -25,7 +37,7 @@ def create_or_update_excel(client_name, source_text, source_lang, target_lang, t
         date.today().strftime("%Y-%m-%d"),
         source_lang,
         target_lang,
-        count_characters(source_text),
+        count_words(source_text),
         source_text,
         translation
     ]
