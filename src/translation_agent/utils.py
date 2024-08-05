@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Union
 import openai
 import anthropic
@@ -652,6 +653,21 @@ def calculate_chunk_size(token_count: int, token_limit: int) -> int:
     return chunk_size
 
 
+def count_words(text):
+    # 去除首尾空白字符
+    text = text.strip()
+    
+    # 专门方法：统计英文单词、数字和中文字符
+    english_words = len(re.findall(r'\b[a-zA-Z0-9]+\b', text))
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
+    specialized_count = english_words + chinese_chars
+    
+    # 通用方法：统计所有非空白字符序列
+    general_count = len(re.findall(r'\S+', text))
+    
+    # 返回两种方法中的最大值
+    return max(specialized_count, general_count)
+
 def translate(
     source_lang,
     target_lang,
@@ -661,7 +677,7 @@ def translate(
     api_choice="claude",
     user_prompt="",
 ):
-    word_count = len(source_text.strip())
+    word_count = count_words(source_text)
 
     print(f"Input text contains approximately {word_count} words.")
     user_confirmation = input("Do you want to proceed with the translation? (y/n): ")
