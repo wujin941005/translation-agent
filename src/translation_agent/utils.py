@@ -1,8 +1,8 @@
 import os
 import re
 from typing import List, Union
-import openai
-import anthropic
+from openai import OpenAI
+from anthropic import Anthropic
 import tiktoken
 from dotenv import load_dotenv
 from icecream import ic
@@ -11,8 +11,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 load_dotenv()  # read local .env file
 ## client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+openrouter_client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY")
+)
 
 MAX_TOKENS_PER_CHUNK = (
     1000  # if text is more than this many tokens, we'll break it up into
@@ -49,7 +53,7 @@ def get_completion(
             If json_mode is False, returns the generated text as a string.
     """
 
-    if api_choice == "openai":
+    if api_choice.lower() == "openai":
         messages = [
             {"role": "system", "content": system_message},
         ]
@@ -64,7 +68,7 @@ def get_completion(
             response_format={"type": "json_object"} if json_mode else None,
         )
         return response.choices[0].message.content
-    elif api_choice == "claude":
+    elif api_choice.lower() == "claude":
         messages = []
         if user_prompt:
             messages.extend([
@@ -81,8 +85,23 @@ def get_completion(
             max_tokens=4000,
         )
         return response.content[0].text
+    elif api_choice.lower() == "openrouter":
+        messages = [
+            {"role": "system", "content": system_message},
+        ]
+        if user_prompt:
+            messages.append({"role": "user", "content": user_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        response = openrouter_client.chat.completions.create(
+            model="anthropic/claude-3.5-sonnet",
+            temperature=temperature,
+            messages=messages,
+            response_format={"type": "json_object"} if json_mode else None,
+        )
+        return response.choices[0].message.content
     else:
-        raise ValueError("Invalid API choice. Choose 'openai' or 'claude'.")
+        raise ValueError("Invalid API choice. Choose 'openai', 'claude' or 'openrouter'.")
 
 def one_chunk_initial_translation(
     source_lang: str, target_lang: str, source_text: str, api_choice: str = "claude", user_prompt: str = ""
