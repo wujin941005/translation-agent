@@ -78,7 +78,7 @@ def get_completion(
         messages.append({"role": "user", "content": prompt})
 
         response = anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-3-7-sonnet-20250219",
             system=system_message,
             messages=messages,
             temperature=temperature,
@@ -94,7 +94,7 @@ def get_completion(
         messages.append({"role": "user", "content": prompt})
 
         response = openrouter_client.chat.completions.create(
-            model="anthropic/claude-3.5-sonnet",
+            model="anthropic/claude-3.7-sonnet",
             temperature=temperature,
             messages=messages,
             response_format={"type": "json_object"} if json_mode else None,
