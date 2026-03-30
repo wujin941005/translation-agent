@@ -179,7 +179,7 @@ Write a list of specific, helpful and constructive suggestions for improving the
 Each suggestion should address one specific part of the translation.
 Output only the suggestions and nothing else."""
 
-    reflection = get_completion(reflection_prompt, system_message=system_message, user_prompt=user_prompt, provider=provider)
+    reflection = get_completion(reflection_prompt, system_message=system_message, user_prompt=user_prompt, temperature=0.3, provider=provider)
     return reflection
 
 
@@ -238,7 +238,7 @@ Please take into account the expert suggestions when editing the translation. Ed
 
 Output only the new translation and nothing else."""
 
-    translation_2 = get_completion(prompt, system_message, user_prompt=user_prompt, provider=provider)
+    translation_2 = get_completion(prompt, system_message, user_prompt=user_prompt, temperature=0.3, provider=provider)
 
     return translation_2
 
@@ -478,7 +478,7 @@ Output only the suggestions and nothing else."""
                 translation_1_chunk=translation_1_chunks[i],
             )
 
-        reflection = get_completion(prompt, system_message=system_message, user_prompt=user_prompt, provider=provider)
+        reflection = get_completion(prompt, system_message=system_message, user_prompt=user_prompt, temperature=0.3, provider=provider)
         reflection_chunks.append(reflection)
 
     return reflection_chunks
@@ -568,7 +568,7 @@ Output only the new translation of the indicated part and nothing else."""
             reflection_chunk=reflection_chunks[i],
         )
 
-        translation_2 = get_completion(prompt, system_message=system_message, user_prompt=user_prompt, provider=provider)
+        translation_2 = get_completion(prompt, system_message=system_message, user_prompt=user_prompt, temperature=0.3, provider=provider)
         translation_2_chunks.append(translation_2)
 
     return translation_2_chunks
