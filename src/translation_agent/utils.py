@@ -2,7 +2,6 @@ import os
 import re
 from typing import List, Union
 from openai import OpenAI
-from anthropic import Anthropic
 import tiktoken
 from dotenv import load_dotenv
 from icecream import ic
@@ -10,16 +9,17 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 load_dotenv()  # read local .env file
-## client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 openrouter_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY")
 )
+uniapi_client = OpenAI(
+    base_url="https://api.uniapi.io/v1",
+    api_key=os.getenv("UNIAPI_API_KEY")
+)
 
 MAX_TOKENS_PER_CHUNK = (
-    1000  # if text is more than this many tokens, we'll break it up into
+    2000  # if text is more than this many tokens, we'll break it up into
 )
 # discrete chunks to translate one chunk at a time
 
@@ -28,10 +28,9 @@ def get_completion(
     prompt: str,
     system_message: str = "You are a helpful assistant.",
     user_prompt: str = "",
-    ##model: str = "gpt-4-turbo",
-    temperature: float = 0.2,
+    temperature: float = 0.7,
     json_mode: bool = False,
-    provider: str = "claude",
+    provider: str = "uniapi",
 ) -> Union[str, dict]:
     """
         Generate a completion using the OpenAI API.
@@ -55,58 +54,30 @@ def get_completion(
             If json_mode is False, returns the generated text as a string.
     """
 
-    if provider.lower() == "openai":
-        messages = [
-            {"role": "system", "content": system_message},
-        ]
-        if user_prompt:
-            messages.append({"role": "user", "content": user_prompt})
-        messages.append({"role": "user", "content": prompt})
+    messages = [
+        {"role": "system", "content": system_message},
+    ]
+    if user_prompt:
+        messages.append({"role": "user", "content": user_prompt})
+    messages.append({"role": "user", "content": prompt})
 
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            temperature=temperature,
-            messages=messages,
-            response_format={"type": "json_object"} if json_mode else None,
-        )
-        return response.choices[0].message.content
-    elif provider.lower() == "claude":
-        messages = []
-        if user_prompt:
-            messages.extend([
-                {"role": "user", "content": user_prompt},
-                {"role": "assistant", "content": "Understood. I'll keep that in mind for the task."}
-            ])
-        messages.append({"role": "user", "content": prompt})
-
-        response = anthropic_client.messages.create(
-            model="claude-3-7-sonnet-20250219",
-            system=system_message,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=4000,
-        )
-        return response.content[0].text
-    elif provider.lower() == "openrouter":
-        messages = [
-            {"role": "system", "content": system_message},
-        ]
-        if user_prompt:
-            messages.append({"role": "user", "content": user_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        response = openrouter_client.chat.completions.create(
-            model="anthropic/claude-3.7-sonnet",
-            temperature=temperature,
-            messages=messages,
-            response_format={"type": "json_object"} if json_mode else None,
-        )
-        return response.choices[0].message.content
+    if provider.lower() == "openrouter":
+        client = openrouter_client
+    elif provider.lower() == "uniapi":
+        client = uniapi_client
     else:
-        raise ValueError("Invalid API provider. Choose 'openai', 'claude' or 'openrouter'.")
+        raise ValueError("Invalid API provider. Choose 'openrouter' or 'uniapi'.")
+
+    response = client.chat.completions.create(
+        model="claude-sonnet-4-6",
+        temperature=temperature,
+        messages=messages,
+        response_format={"type": "json_object"} if json_mode else None,
+    )
+    return response.choices[0].message.content
 
 def one_chunk_initial_translation(
-    source_lang: str, target_lang: str, source_text: str, provider: str = "claude", user_prompt: str = ""
+    source_lang: str, target_lang: str, source_text: str, provider: str = "uniapi", user_prompt: str = ""
 ) -> str:
     """
     Translate the entire text as one chunk using an LLM.
@@ -139,7 +110,8 @@ def one_chunk_reflect_on_translation(
     source_text: str,
     translation_1: str,
     country: str = "",
-    provider: str = "claude",
+    provider: str = "uniapi",
+    user_prompt: str = "",
 ) -> str:
     """
     Use an LLM to reflect on the translation, treating the entire text as one chunk.
@@ -150,6 +122,8 @@ def one_chunk_reflect_on_translation(
         source_text (str): The original text in the source language.
         translation_1 (str): The initial translation of the source text.
         country (str): Country specified for the target language.
+        provider (str): The API provider to use for generating the completion.
+        user_prompt (str): Additional user instructions for the translation.
 
     Returns:
         str: The LLM's reflection on the translation, providing constructive criticism and suggestions for improvement.
@@ -205,7 +179,7 @@ Write a list of specific, helpful and constructive suggestions for improving the
 Each suggestion should address one specific part of the translation.
 Output only the suggestions and nothing else."""
 
-    reflection = get_completion(reflection_prompt, system_message=system_message, provider=provider)
+    reflection = get_completion(reflection_prompt, system_message=system_message, user_prompt=user_prompt, provider=provider)
     return reflection
 
 
@@ -215,7 +189,8 @@ def one_chunk_improve_translation(
     source_text: str,
     translation_1: str,
     reflection: str,
-    provider: str = "claude",
+    provider: str = "uniapi",
+    user_prompt: str = "",
 ) -> str:
     """
     Use the reflection to improve the translation, treating the entire text as one chunk.
@@ -226,6 +201,8 @@ def one_chunk_improve_translation(
         source_text (str): The original text in the source language.
         translation_1 (str): The initial translation of the source text.
         reflection (str): Expert suggestions and constructive criticism for improving the translation.
+        provider (str): The API provider to use for generating the completion.
+        user_prompt (str): Additional user instructions for the translation.
 
     Returns:
         str: The improved translation based on the expert suggestions.
@@ -261,13 +238,13 @@ Please take into account the expert suggestions when editing the translation. Ed
 
 Output only the new translation and nothing else."""
 
-    translation_2 = get_completion(prompt, system_message, provider=provider)
+    translation_2 = get_completion(prompt, system_message, user_prompt=user_prompt, provider=provider)
 
     return translation_2
 
 
 def one_chunk_translate_text(
-    source_lang: str, target_lang: str, source_text: str, country: str = "", provider: str = "claude", user_prompt: str = ""
+    source_lang: str, target_lang: str, source_text: str, country: str = "", provider: str = "uniapi", user_prompt: str = ""
 ) -> str:
     """
     Translate a single chunk of text from the source language to the target language.
@@ -289,10 +266,10 @@ def one_chunk_translate_text(
     )
 
     reflection = one_chunk_reflect_on_translation(
-        source_lang, target_lang, source_text, translation_1, country, provider
+        source_lang, target_lang, source_text, translation_1, country, provider, user_prompt
     )
     translation_2 = one_chunk_improve_translation(
-        source_lang, target_lang, source_text, translation_1, reflection, provider
+        source_lang, target_lang, source_text, translation_1, reflection, provider, user_prompt
     )
 
     return translation_2
@@ -324,7 +301,7 @@ def num_tokens_in_string(
 
 
 def multichunk_initial_translation(
-    source_lang: str, target_lang: str, source_text_chunks: List[str], provider: str = "claude", user_prompt: str = ""
+    source_lang: str, target_lang: str, source_text_chunks: List[str], provider: str = "uniapi", user_prompt: str = ""
 ) -> List[str]:
     """
     Translate a text in multiple chunks from the source language to the target language.
@@ -388,7 +365,8 @@ def multichunk_reflect_on_translation(
     source_text_chunks: List[str],
     translation_1_chunks: List[str],
     country: str = "",
-    provider: str = "claude",
+    provider: str = "uniapi",
+    user_prompt: str = "",
 ) -> List[str]:
     """
     Provides constructive criticism and suggestions for improving a partial translation.
@@ -399,6 +377,8 @@ def multichunk_reflect_on_translation(
         source_text_chunks (List[str]): The source text divided into chunks.
         translation_1_chunks (List[str]): The translated chunks corresponding to the source text chunks.
         country (str): Country specified for the target language.
+        provider (str): The API provider to use for generating the completion.
+        user_prompt (str): Additional user instructions for the translation.
 
     Returns:
         List[str]: A list of reflections containing suggestions for improving each translated chunk.
@@ -498,7 +478,7 @@ Output only the suggestions and nothing else."""
                 translation_1_chunk=translation_1_chunks[i],
             )
 
-        reflection = get_completion(prompt, system_message=system_message, provider=provider)
+        reflection = get_completion(prompt, system_message=system_message, user_prompt=user_prompt, provider=provider)
         reflection_chunks.append(reflection)
 
     return reflection_chunks
@@ -510,7 +490,8 @@ def multichunk_improve_translation(
     source_text_chunks: List[str],
     translation_1_chunks: List[str],
     reflection_chunks: List[str],
-    provider: str = "claude",
+    provider: str = "uniapi",
+    user_prompt: str = "",
 ) -> List[str]:
     """
     Improves the translation of a text from source language to target language by considering expert suggestions.
@@ -521,6 +502,8 @@ def multichunk_improve_translation(
         source_text_chunks (List[str]): The source text divided into chunks.
         translation_1_chunks (List[str]): The initial translation of each chunk.
         reflection_chunks (List[str]): Expert suggestions for improving each translated chunk.
+        provider (str): The API provider to use for generating the completion.
+        user_prompt (str): Additional user instructions for the translation.
 
     Returns:
         List[str]: The improved translation of each chunk.
@@ -585,14 +568,14 @@ Output only the new translation of the indicated part and nothing else."""
             reflection_chunk=reflection_chunks[i],
         )
 
-        translation_2 = get_completion(prompt, system_message=system_message, provider=provider)
+        translation_2 = get_completion(prompt, system_message=system_message, user_prompt=user_prompt, provider=provider)
         translation_2_chunks.append(translation_2)
 
     return translation_2_chunks
 
 
 def multichunk_translation(
-    source_lang, target_lang, source_text_chunks, country: str = "", provider="claude", user_prompt=""
+    source_lang, target_lang, source_text_chunks, country: str = "", provider="uniapi", user_prompt=""
 ):
     """
     Improves the translation of multiple text chunks based on the initial translation and reflection.
@@ -619,6 +602,7 @@ def multichunk_translation(
         translation_1_chunks,
         country,
         provider,
+        user_prompt
     )
 
     translation_2_chunks = multichunk_improve_translation(
@@ -627,7 +611,8 @@ def multichunk_translation(
         source_text_chunks,
         translation_1_chunks,
         reflection_chunks,
-        provider
+        provider,
+        user_prompt
     )
 
     return translation_2_chunks
@@ -695,7 +680,7 @@ def translate(
     source_text,
     country,
     max_tokens=MAX_TOKENS_PER_CHUNK,
-    provider="claude",
+    provider="uniapi",
     user_prompt="",
 ):
     word_count = count_words(source_text)
@@ -743,4 +728,4 @@ def translate(
             source_lang, target_lang, source_text_chunks, country, provider, user_prompt
         )
 
-        return "".join(translation_2_chunks)
+        return "\n".join(translation_2_chunks)
