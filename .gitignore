@@ -9,3 +9,5 @@ wmt
 outputs
 .DS_Store
 dist
+*.xlsx
+~$*.xlsx
